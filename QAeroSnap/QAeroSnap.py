@@ -4,7 +4,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 import win32api
 import win32gui
 
-"""Usage
+"""Usage:
 
 >>> from QAeroSnap import QtAeroSnap
 
