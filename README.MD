@@ -1,13 +1,15 @@
 
-# QAeroSnap: 1.0.0
+# QAeroSnap: 1.1.0
 
 Windows 10 **AeroSnap** for **PyQt6**
 
 This application is currently under development, and new features will soon be available...
 
 #### Information:
-- Work just on the top of the screen
-- Multi Monitor compatibility
+- Work just on the top of the screen (Version: 1.0.0-1.x.x)
+- Multi Monitor compatibility (Version: 1.0.0-1.x.x)
+- Geometry/Opacity animation (Version: 1.1.0-1.x.x)
+- Low optimization (Version: 1.1.0)
 
 ## API Reference
 
