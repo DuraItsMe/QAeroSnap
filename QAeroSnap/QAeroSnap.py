@@ -1,7 +1,6 @@
 # QAeroSnap/QAeroSnap.py
 from PyQt6 import QtCore, QtGui, QtWidgets
 
-import win32api
 import win32gui
 
 """Usage:
@@ -21,18 +20,45 @@ painter_brush_color = QtGui.QColor(255, 255, 255, 12)       # Opacity: 4.7% | Br
 painter_pen_color   = QtGui.QColor(156, 156, 156, 128)      # Opacity: 50%  | Pen Color
 painter_pen_width   = 1                                     # Width: 1px    | Pen Width
 overlay_margin      = 9                                     # Margin: 9px   | Overlay Margin
-mouse_top_spacing   = 10                                    # Spacing: 10px | Mouse Top Spacing
+mouse_top_spacing   = 20                                    # Spacing: 10px | Mouse Top Spacing
 
 class Overlay(QtWidgets.QWidget):
     def __init__(self, screen_geometry: QtCore.QRect):
         super().__init__()
         
+        self._width = 0
+        self._height = 0
+        self._x = screen_geometry.center().x()
+        self._y = screen_geometry.y()
+        
         self.setAttribute(QtCore.Qt.WidgetAttribute.WA_TranslucentBackground)
+        
         self.setWindowFlags(QtCore.Qt.WindowType.FramelessWindowHint  |
                             QtCore.Qt.WindowType.WindowStaysOnTopHint |
                             QtCore.Qt.WindowType.Tool)
         
-        self.setGeometry(screen_geometry)
+        self.setGeometry(self._x, self._y, self._width, self._height)
+        
+    @QtCore.pyqtProperty(QtCore.QRect)
+    def geometry(self):
+        return QtCore.QRect(self._x, self._y, self._width, self._height)
+        
+    @geometry.setter
+    def geometry(self, rect:QtCore.QRect):
+        self._x = rect.x()
+        self._y = rect.y()
+        self._width = rect.width()
+        self._height = rect.height()
+        
+        self.setGeometry(self._x, self._y, self._width, self._height)
+        
+    @QtCore.pyqtProperty(float)
+    def opacity(self):
+        return self.windowOpacity()
+    
+    @opacity.setter
+    def opacity(self, value:float):
+        self.setWindowOpacity(value)
         
     def paintEvent(self, event:QtGui.QPaintEvent):
         global painter_brush_color, painter_pen_color, painter_pen_width, overlay_margin
@@ -40,7 +66,7 @@ class Overlay(QtWidgets.QWidget):
         painter = QtGui.QPainter(self)
         painter.setBrush(painter_brush_color)
         
-        rect = self.rect().adjusted(overlay_margin, overlay_margin, -overlay_margin, -overlay_margin)
+        rect = QtCore.QRect(0, 0, self._width, self._height).adjusted(overlay_margin, overlay_margin, -overlay_margin, -overlay_margin)
         painter.drawRect(rect)
         
         pen = QtGui.QPen(painter_pen_color)
@@ -54,7 +80,10 @@ class QtAeroSnap():
         super().__init__()
         
         self.screen_rect = MainWindow.geometry()
+        
         self.spacing = False
+        
+        self._is_active = True
         
         self.setup_ui(MainWindow, title_bar, x_adj, y_adj)
     
@@ -87,7 +116,10 @@ class QtAeroSnap():
             
         screen = screens[screen_num]
         
-        screen_rect = QtCore.QRect(screen.geometry().x(), screen.geometry().y(), screen.geometry().width(), screen.geometry().height() - self.get_taskbar_height())
+        screen_rect = QtCore.QRect(screen.geometry().x(),
+                                   screen.geometry().y(),
+                                   screen.geometry().width(),
+                                   screen.geometry().height() - self.get_taskbar_height())
         
         self.overlay = Overlay(screen_rect)
         self.overlay.hide()
@@ -111,7 +143,13 @@ class QtAeroSnap():
             self.screen_rect = self.MainWindow.screen().geometry()
             
     def mouseReleaseEvent(self, event: QtGui.QMouseEvent):
-        if self.overlay.isVisible():
+        global mouse_top_spacing
+        
+        screen_top = self.screen_rect.getCoords()[1]
+        
+        y = event.globalPosition().y()
+        
+        if screen_top + mouse_top_spacing >= y >= screen_top:
             self.MainWindow.showMaximized()
             self.overlay.hide()
             
@@ -139,15 +177,75 @@ class QtAeroSnap():
             self.screen_rect = self.MainWindow.screen().geometry()
             self.setup_overlay()
             
-        screen_rect = win32api.GetMonitorInfo(win32api.EnumDisplayMonitors()[0][0])['Monitor']
-        screen_left, screen_top, screen_right, screen_bottom = screen_rect
+        screen_top = self.screen_rect.getCoords()[1]
         
         if screen_top == y:
             self.spacing = True
 
         if self.spacing:
+            self.timer = QtCore.QTimer()
+            self.timer.setSingleShot(True)
+            self.timer.timeout.connect(self.overlay.hide)
+            
             if screen_top + mouse_top_spacing >= y >= screen_top:
-                self.overlay.show()
+                self.animation_size()
             else:
-                self.spacing = False
-                self.overlay.hide()
+                self.animation_size_reverse()
+                self.timer.start(250)
+                
+    def animation_size(self):
+        if self._is_active:            
+            
+            self.overlay.show()
+
+            screen_geometry = self.MainWindow.screen().geometry()
+
+            start_rect = QtCore.QRect(
+                screen_geometry.center().x() - 50,
+                screen_geometry.y(),
+                100,
+                10
+            )
+
+            target_rect = QtCore.QRect(
+                screen_geometry.x(),
+                screen_geometry.y(),
+                screen_geometry.width(),
+                screen_geometry.height() - self.get_taskbar_height()
+            )
+
+            self.animation_geometry = QtCore.QPropertyAnimation(self.overlay, b"geometry")
+            self.animation_geometry.setDuration(150)
+            self.animation_geometry.setStartValue(start_rect)
+            self.animation_geometry.setEndValue(target_rect)
+            self.animation_geometry.setEasingCurve(QtCore.QEasingCurve.Type.InOutCubic)
+            
+            self.animation_opacity = QtCore.QPropertyAnimation(self.overlay, b"opacity")
+            self.animation_opacity.setDuration(250)
+            self.animation_opacity.setStartValue(0.0)
+            self.animation_opacity.setEndValue(1.0)
+            self.animation_opacity.setEasingCurve(QtCore.QEasingCurve.Type.InOutSine)
+            
+            self.animation_group = QtCore.QParallelAnimationGroup()
+            self.animation_group.addAnimation(self.animation_geometry)
+            self.animation_group.addAnimation(self.animation_opacity)
+            self.animation_group.start()
+
+            self._is_active = False
+            
+    def animation_size_reverse(self):
+        if not self._is_active:
+            
+            self.animation_group.stop()
+            
+            self.animation_opacity_reverse = QtCore.QPropertyAnimation(self.overlay, b"opacity")
+            self.animation_opacity_reverse.setDuration(250)
+            self.animation_opacity_reverse.setStartValue(self.overlay.windowOpacity())
+            self.animation_opacity_reverse.setEndValue(0.0)
+            self.animation_opacity_reverse.setEasingCurve(QtCore.QEasingCurve.Type.InOutSine)
+            
+            self.animation_opacity_reverse.start()
+
+            self._is_active = True
+            
+            self.spacing = False
