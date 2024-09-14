@@ -3,6 +3,8 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 
 import win32gui
 
+from typing import Optional
+
 """Usage:
 
 >>> from QAeroSnap import QtAeroSnap
@@ -16,20 +18,25 @@ import win32gui
 
 """
 
-painter_brush_color = QtGui.QColor(255, 255, 255, 12)       # Opacity: 4.7% | Brush Color
-painter_pen_color   = QtGui.QColor(156, 156, 156, 128)      # Opacity: 50%  | Pen Color
-painter_pen_width   = 1                                     # Width: 1px    | Pen Width
-overlay_margin      = 9                                     # Margin: 9px   | Overlay Margin
-mouse_top_spacing   = 20                                    # Spacing: 10px | Mouse Top Spacing
+# Global
+painter_brush_color = QtGui.QColor(255, 255, 255, 12)
+painter_pen_color   = QtGui.QColor(156, 156, 156, 128)
+painter_pen_width   = 1
+overlay_margin      = 9
+mouse_edge_spacing  = 20
 
+top_right           = 20
+right_top           = 25
+
+# Overlay
 class Overlay(QtWidgets.QWidget):
     def __init__(self, screen_geometry: QtCore.QRect):
         super().__init__()
         
-        self._width = 0
-        self._height = 0
-        self._x = screen_geometry.center().x()
-        self._y = screen_geometry.y()
+        self._width:    int = 0
+        self._height:   int = 0
+        self._x:        int = screen_geometry.center().x()
+        self._y:        int = screen_geometry.y()
         
         self.setAttribute(QtCore.Qt.WidgetAttribute.WA_TranslucentBackground)
         
@@ -40,20 +47,20 @@ class Overlay(QtWidgets.QWidget):
         self.setGeometry(self._x, self._y, self._width, self._height)
         
     @QtCore.pyqtProperty(QtCore.QRect)
-    def geometry(self):
+    def geometry(self) -> QtCore.QRect:
         return QtCore.QRect(self._x, self._y, self._width, self._height)
         
     @geometry.setter
     def geometry(self, rect:QtCore.QRect):
-        self._x = rect.x()
-        self._y = rect.y()
-        self._width = rect.width()
-        self._height = rect.height()
+        self._x:        int = rect.x()
+        self._y:        int = rect.y()
+        self._width:    int = rect.width()
+        self._height:   int = rect.height()
         
         self.setGeometry(self._x, self._y, self._width, self._height)
         
     @QtCore.pyqtProperty(float)
-    def opacity(self):
+    def opacity(self) -> float:
         return self.windowOpacity()
     
     @opacity.setter
@@ -74,19 +81,25 @@ class Overlay(QtWidgets.QWidget):
         painter.setPen(pen)
         
         painter.drawRect(rect.adjusted(1 // 2, 1 // 2, -(1 // 2), -(1 // 2)))
-
+        
+# QtAeroSnap
 class QtAeroSnap():
+    # __init__
     def __init__(self, MainWindow: QtWidgets.QMainWindow, title_bar: QtWidgets.QWidget, x_adj: int = 0, y_adj: int = 0):
         super().__init__()
         
-        self.screen_rect = MainWindow.geometry()
+        self.screen_rect: QtCore.QRect = MainWindow.geometry()
         
-        self.spacing = False
+        self.spacing: bool = False
         
-        self._is_active = True
+        self._is_active: bool = True
+        
+        self.default_pos: Optional[int] = None
+        self.default_screen: Optional[QtGui.QScreen] = None
         
         self.setup_ui(MainWindow, title_bar, x_adj, y_adj)
     
+    # setup_ui
     def setup_ui(self, MainWindow: QtWidgets.QMainWindow, title_bar: QtWidgets.QWidget, x_adj: int, y_adj: int):
         self.MainWindow = MainWindow
         
@@ -97,7 +110,8 @@ class QtAeroSnap():
         self.x_adj = x_adj
         self.y_adj = y_adj
     
-    def get_taskbar_height(self):
+    # get taskbar height
+    def get_taskbar_height(self) -> int:
         taskbar_hwnd = win32gui.FindWindow("Shell_TrayWnd", None)
         
         taskbar_rect = win32gui.GetWindowRect(taskbar_hwnd)
@@ -106,15 +120,8 @@ class QtAeroSnap():
         
         return taskbar_height
     
-    def setup_overlay(self):
-        screens = QtWidgets.QApplication.screens()
-        
-        for i, screen in enumerate(screens):
-            if screen.geometry().intersects(self.screen_rect):
-                screen_num = i
-                break
-            
-        screen = screens[screen_num]
+    # setup overlay
+    def setup_overlay(self, screen: QtGui.QScreen):
         
         screen_rect = QtCore.QRect(screen.geometry().x(),
                                    screen.geometry().y(),
@@ -124,35 +131,40 @@ class QtAeroSnap():
         self.overlay = Overlay(screen_rect)
         self.overlay.hide()
         
+    # mouse press event
     def mousePressEvent(self, event: QtGui.QMouseEvent):
         if event.button() == QtCore.Qt.MouseButton.LeftButton:
             if self.MainWindow.isMaximized():
                 self.offset = event.pos()
                 self.x_w = self.offset.x() // 2.4
-            
             else:
                 self.offset = event.pos()
                 self.x_w = self.offset.x()
-                
-            self.setup_overlay()
-            
+    
+    # mouse move event
     def mouseMoveEvent(self, event: QtGui.QMouseEvent):
         if event.buttons() == QtCore.Qt.MouseButton.LeftButton:
             self.move_to_position(event)
             self.check_snap_to_edge(event)
             self.screen_rect = self.MainWindow.screen().geometry()
-            
+    
+    # mouse release event
     def mouseReleaseEvent(self, event: QtGui.QMouseEvent):
-        global mouse_top_spacing
+        global mouse_edge_spacing
         
         screen_top = self.screen_rect.getCoords()[1]
+        screen_right = self.screen_rect.getCoords()[2]
+        screen_left = self.screen_rect.getCoords()[0]
         
         y = event.globalPosition().y()
+        x = event.globalPosition().x()
         
-        if screen_top + mouse_top_spacing >= y >= screen_top:
+        if screen_top + mouse_edge_spacing >= y >= screen_top and x < (screen_right - 5) and x > (screen_left + 5):
+            self.MainWindow.move(self.default_screen.geometry().topLeft())
             self.MainWindow.showMaximized()
             self.overlay.hide()
             
+    # move mainwindow
     def move_to_position(self, event: QtGui.QMouseEvent):
         x = event.globalPosition().x()
         y = event.globalPosition().y()
@@ -168,16 +180,39 @@ class QtAeroSnap():
 
         self.MainWindow.move(int(x - x_w - x_adj), int(y - y_w - y_adj))
         
+    # check border
     def check_snap_to_edge(self, event: QtGui.QMouseEvent):
-        global mouse_top_spacing
+        global mouse_edge_spacing
         
         y = event.globalPosition().y()
+        x = event.globalPosition().x()
         
-        if self.screen_rect.getCoords()[0] != self.MainWindow.screen().geometry().getCoords()[0]:
-            self.screen_rect = self.MainWindow.screen().geometry()
-            self.setup_overlay()
+        pos = int(event.globalPosition().x())
+        
+        screens = QtWidgets.QApplication.screens()
+        
+        sorted_screens = sorted([(screen.geometry().getCoords()[0], i) for i, screen in enumerate(screens)])
+        
+        for i in range(len(sorted_screens)):
+            try:
+                if sorted_screens[i][0] <= pos < sorted_screens[i+1][0]:
+                    screen = screens[sorted_screens[i][1]]
+                    self.screen_rect = screen.geometry()
+                    break
+            except IndexError:
+                if sorted_screens[i][0]*2 >= pos >= sorted_screens[i][0]:
+                    screen = screens[sorted_screens[i][1]]
+                    self.screen_rect = screen.geometry()
+                    break
+        
+        if self.screen_rect.getCoords()[0] != self.default_pos:
+            self.default_pos = self.screen_rect.getCoords()[0]
+            self.default_screen = screen
+            self.setup_overlay(screen)
             
         screen_top = self.screen_rect.getCoords()[1]
+        screen_right = self.screen_rect.getCoords()[2]
+        screen_left = self.screen_rect.getCoords()[0]
         
         if screen_top == y:
             self.spacing = True
@@ -187,18 +222,46 @@ class QtAeroSnap():
             self.timer.setSingleShot(True)
             self.timer.timeout.connect(self.overlay.hide)
             
-            if screen_top + mouse_top_spacing >= y >= screen_top:
-                self.animation_size()
+            if screen_top + mouse_edge_spacing >= y >= screen_top and x < (screen_right - 5) and x > (screen_left + 5):
+                self.animation_size('full')
             else:
                 self.animation_size_reverse()
                 self.timer.start(250)
-                
-    def animation_size(self):
+    
+    # custom screen rect
+    def type_screen_rect(self, args: str) -> QtCore.QRect:
+        screen_geometry = self.screen_rect
+        
+        X = screen_geometry.x()
+        Y = screen_geometry.y()
+        WIDTH = screen_geometry.width()
+        HEIGHT = screen_geometry.height()
+        
+        TASK_BAR = self.get_taskbar_height()
+        
+        if args == 'full' or args == 'right' or args == 'left':
+            HEIGHT = HEIGHT - TASK_BAR
+        if args == 'right' or args == 'left':
+            WIDTH = WIDTH // 2
+        if args == 'right' :
+            X = X + WIDTH
+        
+        rect = QtCore.QRect(
+                X,
+                Y,
+                WIDTH,
+                HEIGHT
+            )
+        
+        return rect
+    
+    # show overlay animation
+    def animation_size(self, args: str):
         if self._is_active:            
             
             self.overlay.show()
-
-            screen_geometry = self.MainWindow.screen().geometry()
+            
+            screen_geometry = self.screen_rect
 
             start_rect = QtCore.QRect(
                 screen_geometry.center().x() - 50,
@@ -207,12 +270,7 @@ class QtAeroSnap():
                 10
             )
 
-            target_rect = QtCore.QRect(
-                screen_geometry.x(),
-                screen_geometry.y(),
-                screen_geometry.width(),
-                screen_geometry.height() - self.get_taskbar_height()
-            )
+            target_rect = self.type_screen_rect(args)
 
             self.animation_geometry = QtCore.QPropertyAnimation(self.overlay, b"geometry")
             self.animation_geometry.setDuration(150)
@@ -232,7 +290,8 @@ class QtAeroSnap():
             self.animation_group.start()
 
             self._is_active = False
-            
+    
+    # hide overlay animation
     def animation_size_reverse(self):
         if not self._is_active:
             
